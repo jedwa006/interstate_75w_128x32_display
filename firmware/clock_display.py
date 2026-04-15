@@ -71,7 +71,39 @@ class ClockDisplay:
 
         # Time (large font, row 7)
         time_str = "{:02d}:{:02d}:{:02d}".format(hour, minute, second)
-        self._render_time(time_str, 7, now_ticks)
+        time_y = 7
+        self._render_time(time_str, time_y, now_ticks)
+
+        # Milliseconds (tiny font, bottom-right of time digits)
+        ms = now_ticks % 1000
+        ms_str = ".{:03d}".format(ms)
+        scale = 2
+        char_h = FONT_H * scale  # 14
+        time_w = string_width(time_str, scale)
+        time_x = (COLS - time_w) // 2
+        ms_x = time_x + time_w + 1
+        ms_y = time_y + char_h - TINY_H  # align to bottom of big digits
+
+        # Dim the ms based on offset — less trustworthy = dimmer
+        offset = abs(self.ntp.get_offset_ms())
+        if offset < 10:
+            ms_alpha = 0.5    # high confidence
+        elif offset < 30:
+            ms_alpha = 0.3    # moderate
+        elif offset < 100:
+            ms_alpha = 0.15   # low confidence
+        else:
+            ms_alpha = 0.0    # don't show — too inaccurate
+
+        if ms_alpha > 0:
+            r, g, b = self.config.color()
+            br = self.config.brightness_frac()
+            ms_pen = self.g.create_pen(
+                int(r * br * ms_alpha),
+                int(g * br * ms_alpha),
+                int(b * br * ms_alpha),
+            )
+            draw_tiny_str(self.g, ms_str, ms_x, ms_y, ms_pen)
 
         # NTP indicators (row 22+)
         self._render_ntp(22)
