@@ -25,7 +25,7 @@ i75 = Interstate75(display=Interstate75.DISPLAY_INTERSTATE75_128X32, color_order
 graphics = i75.display
 ntp = NTPManager(i75, config)
 night = NightMode(config)
-display = ClockDisplay(graphics, config, ntp, night)
+display = ClockDisplay(graphics, config, ntp, night, i75)
 menu = None  # lazy-loaded to save memory
 
 
@@ -63,6 +63,10 @@ def boot_sequence():
     else:
         show_status("NO WIFI")
     time.sleep_ms(500)
+
+    # Boot animation: quick sunrise → sunset sequence
+    if night.enabled:
+        night.play_boot_animation(i75, graphics)
 
 
 # --- Menu handling ---

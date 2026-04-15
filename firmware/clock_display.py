@@ -61,11 +61,12 @@ ANIM_DURATION = 400  # ms for digit transitions
 class ClockDisplay:
     """Renders the clock face: date, time, and NTP indicators."""
 
-    def __init__(self, graphics, config, ntp, night_mode=None):
+    def __init__(self, graphics, config, ntp, night_mode=None, i75=None):
         self.g = graphics
         self.config = config
         self.ntp = ntp
         self.night = night_mode
+        self._i75 = i75
 
         # Track last night mode blend to avoid recreating pens every frame
         self._last_amber_blend = -1
@@ -182,7 +183,7 @@ class ClockDisplay:
 
         # Sunset/sunrise horizon animation (renders on top during transitions)
         if self.night and self.night.in_transition:
-            self.night.render_animation(self.g, 31)
+            self.night.render_animation(self.g, 31, self._i75)
 
     def _format_date(self, year, month, day, weekday):
         fmt = self.config.get("date_format", "iso")
