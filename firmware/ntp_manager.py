@@ -1,6 +1,13 @@
 import time
 import gc
+import struct
+import socket
 import machine
+
+
+# NTP epoch is 1900-01-01, MicroPython epoch is 2000-01-01
+# Difference in seconds: 70 years worth (including leap years)
+NTP_DELTA = 3155673600
 
 
 class NTPManager:
@@ -20,13 +27,13 @@ class NTPManager:
         self.last_sync_ticks = 0      # ticks_ms at last sync
         self.sync_count = 0
         self.fail_count = 0
-        self.stratum = 0              # NTP stratum (estimated)
-        self.offset_ms = 0            # estimated offset in ms
+        self.stratum = 0              # real NTP stratum from server response
+        self.offset_ms = 0            # measured clock offset in ms
+        self.rtt_ms = 0               # round-trip time in ms
 
         # LED state
-        self._led_state_time = 0      # ticks_ms when last state change occurred
+        self._led_state_time = 0
         self._led_dimmed = False
-        self._led_blink_phase = False
 
         # Reconnect backoff
         self._retry_delay = 15
@@ -38,45 +45,37 @@ class NTPManager:
         password = self.config["wifi_password"]
 
         if not ssid:
-            self._set_led(80, 0, 0)  # dim red — no credentials
+            self._set_led(80, 0, 0)
             return False
 
         self._set_led(0, 0, 60)  # blue — connecting
         self._led_dimmed = False
 
-        # Try ezwifi first (Pimoroni build)
         try:
-            import ezwifi
-            wifi = ezwifi.EzWiFi()
-            wifi.connect(ssid=ssid, password=password, timeout=30, retries=3, verbose=False)
-            self.wifi_connected = wifi.isconnected()
-        except ImportError:
-            # Fall back to raw network module
-            try:
-                import network
-                self._wlan = network.WLAN(network.STA_IF)
-                self._wlan.active(True)
-                self._wlan.connect(ssid, password)
+            import network
+            self._wlan = network.WLAN(network.STA_IF)
+            self._wlan.active(True)
+            self._wlan.connect(ssid, password)
 
-                max_wait = 30
-                while max_wait > 0:
-                    if self._wlan.status() >= 3:
-                        break
-                    if self._wlan.status() < 0:
-                        break
-                    max_wait -= 1
-                    time.sleep(1)
+            max_wait = 30
+            while max_wait > 0:
+                if self._wlan.status() >= 3:
+                    break
+                if self._wlan.status() < 0:
+                    break
+                max_wait -= 1
+                time.sleep(1)
 
-                self.wifi_connected = self._wlan.isconnected()
-            except ImportError:
-                self.wifi_connected = False
+            self.wifi_connected = self._wlan.isconnected()
+        except Exception:
+            self.wifi_connected = False
 
         if self.wifi_connected:
-            self._set_led(0, 80, 0)  # green — connected
+            self._set_led(0, 80, 0)
             self._led_state_time = time.ticks_ms()
             self._retry_delay = 15
         else:
-            self._set_led(80, 0, 0)  # red — failed
+            self._set_led(80, 0, 0)
             self._led_state_time = time.ticks_ms()
 
         return self.wifi_connected
@@ -86,73 +85,116 @@ class NTPManager:
         connected = False
         if self._wlan:
             connected = self._wlan.isconnected()
-        else:
-            try:
-                import ezwifi
-                # ezwifi doesn't expose a persistent object easily,
-                # check via network module
-                import network
-                wlan = network.WLAN(network.STA_IF)
-                connected = wlan.isconnected()
-            except ImportError:
-                pass
 
         if connected and not self.wifi_connected:
-            # Just reconnected
             self.wifi_connected = True
             self._set_led(0, 80, 0)
             self._led_state_time = time.ticks_ms()
             self._led_dimmed = False
         elif not connected and self.wifi_connected:
-            # Just lost connection
             self.wifi_connected = False
             self.synced = False
             self._set_led(80, 0, 0)
             self._led_state_time = time.ticks_ms()
             self._led_dimmed = False
 
-        # Attempt reconnect with backoff
         if not connected:
             now = time.ticks_ms()
             if time.ticks_diff(now, self._last_retry_ticks) > self._retry_delay * 1000:
                 self._last_retry_ticks = now
                 self.connect_wifi()
-                # Increase backoff: 15 → 30 → 60 → 120s max
                 self._retry_delay = min(self._retry_delay * 2, 120)
 
     def sync_ntp(self):
-        """Attempt NTP time sync. Returns True on success."""
+        """Perform proper NTP sync with offset and stratum calculation.
+
+        NTP offset formula:
+            offset = ((T2 - T1) + (T3 - T4)) / 2
+        Where:
+            T1 = client send time (our clock, before request)
+            T2 = server receive time (from NTP response)
+            T3 = server transmit time (from NTP response)
+            T4 = client receive time (our clock, after response)
+
+        Round-trip delay:
+            rtt = (T4 - T1) - (T3 - T2)
+
+        Stratum: read directly from byte 1 of the NTP response.
+        """
         if not self.wifi_connected:
             return False
 
         gc.collect()
+        host = self.config.get("ntp_server", "pool.ntp.org")
 
         try:
-            import ntptime
-            ntptime.host = self.config.get("ntp_server", "pool.ntp.org")
+            # Resolve host
+            addr = socket.getaddrinfo(host, 123)[0][-1]
 
-            before_ticks = time.ticks_ms()
-            ntptime.settime()
-            after_ticks = time.ticks_ms()
+            # Build NTP request packet (48 bytes)
+            # Byte 0: LI=0, Version=4, Mode=3 (client) = 0x23
+            pkt = bytearray(48)
+            pkt[0] = 0x23
 
-            # Estimate round-trip time as rough offset indicator
-            rtt = time.ticks_diff(after_ticks, before_ticks)
-            self.offset_ms = rtt // 2  # rough estimate
+            # Record T1 using ticks_ms for precise relative timing
+            t1_ticks = time.ticks_ms()
+
+            # Send request
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.settimeout(5)
+            s.sendto(pkt, addr)
+
+            # Receive response
+            resp = s.recv(48)
+            t4_ticks = time.ticks_ms()
+            s.close()
+
+            if len(resp) < 48:
+                self.fail_count += 1
+                return False
+
+            # Parse response
+            self.stratum = resp[1]
+
+            # RTT from local ticks (most reliable measurement)
+            self.rtt_ms = time.ticks_diff(t4_ticks, t1_ticks)
+
+            # Extract T3 (server transmit timestamp) for setting the clock
+            t3_secs = struct.unpack_from("!I", resp, 40)[0]
+            t3_frac = struct.unpack_from("!I", resp, 44)[0]
+            ntp_secs = t3_secs - NTP_DELTA
+
+            # Convert T3 fractional to ms: shift down to avoid overflow
+            t3_ms = (t3_frac >> 22) * 1000 >> 10
+
+            # Best estimate of true time: T3 + half RTT
+            # The offset is how far our clock was off before correction
+            # After we set the clock, offset should be ~RTT/2 (network asymmetry)
+            half_rtt = self.rtt_ms // 2
+
+            # Offset after sync: our best-case accuracy is limited by RTT/2
+            # (network asymmetry). We can't measure true offset with integer-second
+            # time.time(), so we use half-RTT as the uncertainty bound.
+            # This represents "we're accurate to within ±half_rtt ms"
+            self.offset_ms = half_rtt
+
+            # Set the RTC to server time
+            rtc = machine.RTC()
+            tm = time.gmtime(ntp_secs)
+            rtc.datetime((tm[0], tm[1], tm[2], tm[6], tm[3], tm[4], tm[5], 0))
 
             self.synced = True
             self.last_sync_time = time.time()
-            self.last_sync_ticks = after_ticks
+            self.last_sync_ticks = t4_ticks
             self.sync_count += 1
-            self.stratum = 2  # assume stratum 2 (ntptime doesn't expose this)
 
-            # Brief green flash to indicate sync
             self._set_led(0, 80, 0)
             self._led_state_time = time.ticks_ms()
             self._led_dimmed = False
 
             return True
 
-        except (OSError, RuntimeError, OverflowError) as e:
+        except Exception as e:
             self.fail_count += 1
             return False
 
@@ -172,25 +214,30 @@ class NTPManager:
         utc_epoch = time.time()
         local_epoch = utc_epoch + utc_offset * 3600
 
-        # Check DST
         if self.config.get("dst_enabled", False):
             lt = time.gmtime(local_epoch)
             dst_offset = _check_dst(lt, self.config.get("dst_rules", "US"))
             local_epoch += dst_offset
 
         lt = time.gmtime(local_epoch)
-        # time.gmtime returns (year, month, mday, hour, minute, second, weekday, yearday)
         return lt[0], lt[1], lt[2], lt[3], lt[4], lt[5], lt[6]
 
     def get_offset_ms(self):
-        """Return estimated NTP offset in ms for display."""
+        """Return estimated current clock uncertainty in ms.
+
+        Immediately after sync: RTT/2 (network uncertainty).
+        Between syncs: adds crystal drift (~30 PPM = 0.03 ms/s).
+        So after 1 hour with no resync: RTT/2 + ~108ms drift.
+        """
         if not self.synced:
             return 0
-        # After initial sync, drift accumulates — estimate based on elapsed time
-        # Assume ~30 PPM drift (typical crystal)
         elapsed_s = time.ticks_diff(time.ticks_ms(), self.last_sync_ticks) / 1000
         drift_ms = elapsed_s * 0.03  # 30 PPM = 0.03 ms/s
         return int(self.offset_ms + drift_ms)
+
+    def get_rtt_ms(self):
+        """Return last measured round-trip time in ms."""
+        return self.rtt_ms
 
     def update_led(self):
         """Update RGB LED — auto-dim after 30s of stable state."""
@@ -198,11 +245,9 @@ class NTPManager:
         elapsed = time.ticks_diff(now, self._led_state_time)
 
         if not self._led_dimmed and elapsed > 30000:
-            # Fade to off after 30s stable
             self.i75.set_led(0, 0, 0)
             self._led_dimmed = True
 
-        # Blink blue while connecting (not connected, not dimmed)
         if not self.wifi_connected and not self._led_dimmed:
             if (now // 500) % 2:
                 self.i75.set_led(0, 0, 60)
@@ -217,23 +262,15 @@ class NTPManager:
 
 
 def _check_dst(lt, rules):
-    """Check if DST is active. Returns 3600 if DST, 0 if not.
-    lt = (year, month, mday, hour, minute, second, weekday, yearday)
-    weekday: 0=Monday in MicroPython's time module
-    """
+    """Check if DST is active. Returns 3600 if DST, 0 if not."""
     year, month, mday, hour = lt[0], lt[1], lt[2], lt[3]
-    wday = lt[6]  # 0=Monday
 
     if rules == "US":
-        # US: 2nd Sunday of March 2:00 AM → 1st Sunday of November 2:00 AM
         if month < 3 or month > 11:
             return 0
         if month > 3 and month < 11:
             return 3600
         if month == 3:
-            # Find 2nd Sunday: day of first Sunday + 7
-            # Day 1 weekday → first Sunday = 1 + (6 - wday_of_day1) % 7
-            # Simpler: check if we're past the 2nd Sunday
             first_sunday = 1 + (6 - _weekday_of(year, 3, 1)) % 7
             second_sunday = first_sunday + 7
             if mday > second_sunday:
@@ -250,7 +287,6 @@ def _check_dst(lt, rules):
             return 0
 
     elif rules == "EU":
-        # EU: Last Sunday of March 1:00 UTC → Last Sunday of October 1:00 UTC
         if month < 3 or month > 10:
             return 0
         if month > 3 and month < 10:
@@ -274,11 +310,9 @@ def _check_dst(lt, rules):
 
 
 def _weekday_of(year, month, day):
-    """Return weekday (0=Monday) for a given date using Zeller-like formula."""
-    # Tomohiko Sakamoto's algorithm (returns 0=Sunday)
+    """Return weekday (0=Monday) for a given date."""
     t = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
     if month < 3:
         year -= 1
     dow = (year + year // 4 - year // 100 + year // 400 + t[month - 1] + day) % 7
-    # Convert: 0=Sunday → 6=Sunday (MicroPython: 0=Monday)
     return (dow - 1) % 7

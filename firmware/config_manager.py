@@ -15,6 +15,7 @@ DEFAULTS = {
     "colon_style": "blink",
     "date_format": "iso",
     "transition_mode": "scroll",
+    "color_order": "RBG",
 }
 
 CONFIG_PATH = "config.json"
