@@ -61,10 +61,15 @@ ANIM_DURATION = 400  # ms for digit transitions
 class ClockDisplay:
     """Renders the clock face: date, time, and NTP indicators."""
 
-    def __init__(self, graphics, config, ntp):
+    def __init__(self, graphics, config, ntp, night_mode=None):
         self.g = graphics
         self.config = config
         self.ntp = ntp
+        self.night = night_mode
+
+        # Track last night mode blend to avoid recreating pens every frame
+        self._last_amber_blend = -1
+        self._last_brightness_mult = -1
 
         # Pre-create pens (will be recreated on color change)
         self._update_pens()
@@ -73,9 +78,15 @@ class ClockDisplay:
         self._digit_slots = {}  # {position: (prev_ch, new_ch, start_ticks)}
 
     def _update_pens(self):
-        """Create drawing pens from current config."""
+        """Create drawing pens from current config, applying night mode if active."""
         r, g, b = self.config.color()
-        br = self.config.brightness_frac()
+        br_pct = self.config["brightness"]
+
+        # Apply night mode color/brightness adjustments
+        if self.night:
+            r, g, b, br = self.night.apply_color(r, g, b, br_pct)
+        else:
+            br = br_pct / 100.0
         self.pen_main = self.g.create_pen(int(r * br), int(g * br), int(b * br))
         self.pen_dim = self.g.create_pen(int(r * br * 0.4), int(g * br * 0.4), int(b * br * 0.4))
         self.pen_black = self.g.create_pen(0, 0, 0)
@@ -97,6 +108,19 @@ class ClockDisplay:
 
     def render(self, local_time):
         """Render a full frame. local_time = (year, month, day, hour, min, sec, weekday)."""
+        # Update night mode and refresh pens if blending changed
+        if self.night:
+            year_nm, month_nm, day_nm = local_time[0], local_time[1], local_time[2]
+            doy = _day_of_year(year_nm, month_nm, day_nm)
+            self.night.update(local_time[3], local_time[4], doy, year_nm)
+            ab = self.night.amber_blend
+            bm = self.night.brightness_mult
+            # Only recreate pens when blend changes significantly (avoid per-frame alloc)
+            if abs(ab - self._last_amber_blend) > 0.02 or abs(bm - self._last_brightness_mult) > 0.02:
+                self._last_amber_blend = ab
+                self._last_brightness_mult = bm
+                self._update_pens()
+
         self.g.set_pen(self.pen_black)
         self.g.clear()
 
@@ -155,6 +179,10 @@ class ClockDisplay:
 
         # NTP indicators (row 22+)
         self._render_ntp(22)
+
+        # Sunset/sunrise horizon animation (renders on top during transitions)
+        if self.night and self.night.in_transition:
+            self.night.render_animation(self.g, 31)
 
     def _format_date(self, year, month, day, weekday):
         fmt = self.config.get("date_format", "iso")
@@ -279,9 +307,13 @@ class ClockDisplay:
         return 0.3 + 0.7 * (0.5 + 0.5 * math.cos(frac * 2 * math.pi))
 
     def _alpha_pen(self, alpha):
-        """Create a pen with the main color scaled by alpha."""
+        """Create a pen with the main color scaled by alpha, night-mode-aware."""
         r, g, b = self.config.color()
-        br = self.config.brightness_frac()
+        br_pct = self.config["brightness"]
+        if self.night:
+            r, g, b, br = self.night.apply_color(r, g, b, br_pct)
+        else:
+            br = br_pct / 100.0
         return self.g.create_pen(
             int(r * br * alpha),
             int(g * br * alpha),

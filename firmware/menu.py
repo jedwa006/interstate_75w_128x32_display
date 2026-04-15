@@ -12,6 +12,7 @@ MENU_ITEMS = (
     ("TRANS", "transition_mode", ("scroll", "crossfade", "snap")),
     ("UTC", "utc_offset", tuple(range(-12, 15))),
     ("DST", "dst_enabled", (True, False)),
+    ("NIGHT", "night_mode_enabled", (True, False)),
     ("NTP SYNC", "_action_sync", None),
     ("SHOW IP", "_action_ip", None),
 )

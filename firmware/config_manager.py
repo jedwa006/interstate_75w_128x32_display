@@ -16,6 +16,12 @@ DEFAULTS = {
     "date_format": "iso",
     "transition_mode": "scroll",
     "color_order": "RBG",
+    "night_mode_enabled": True,
+    "sunset_hour": 20,
+    "sunrise_hour": 7,
+    "night_brightness_pct": 50,
+    "lat": 0,
+    "lon": 0,
 }
 
 CONFIG_PATH = "config.json"

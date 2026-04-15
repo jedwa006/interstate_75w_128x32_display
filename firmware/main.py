@@ -4,6 +4,7 @@ from interstate75 import Interstate75
 from config_manager import Config
 from ntp_manager import NTPManager
 from clock_display import ClockDisplay
+from night_mode import NightMode
 from fonts import draw_tiny_centered
 
 # --- Init ---
@@ -23,7 +24,8 @@ _co = _COLOR_ORDERS.get(config.get("color_order", "RBG"), Interstate75.COLOR_ORD
 i75 = Interstate75(display=Interstate75.DISPLAY_INTERSTATE75_128X32, color_order=_co)
 graphics = i75.display
 ntp = NTPManager(i75, config)
-display = ClockDisplay(graphics, config, ntp)
+night = NightMode(config)
+display = ClockDisplay(graphics, config, ntp, night)
 menu = None  # lazy-loaded to save memory
 
 
@@ -49,6 +51,9 @@ def boot_sequence():
     """Connect WiFi and sync NTP at startup."""
     show_status("CONNECTING")
     if ntp.connect_wifi():
+        # Try to get location for astronomical sunrise/sunset
+        night.try_geolocate()
+
         show_status("SYNCING NTP")
         ntp.sync_ntp()
         if ntp.synced:
