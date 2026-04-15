@@ -168,7 +168,7 @@ class ClockDisplay:
         return "{} {:02d} {}".format(day_name, day, month_name)
 
     def _format_debug(self):
-        """Format debug line: offset, RTT, stratum, time since sync."""
+        """Format debug line: offset, RTT, stratum, sync age, next sync."""
         off = self.ntp.get_offset_ms()
         rtt = self.ntp.rtt_ms
         strat = self.ntp.stratum
@@ -182,10 +182,20 @@ class ClockDisplay:
                 age_str = '{}m'.format(age_s // 60)
             else:
                 age_str = '{}h'.format(age_s // 3600)
+
+            # Time until next sync
+            remaining = max(0, self.ntp._next_sync_interval - age_s)
+            if remaining < 60:
+                nxt = '{}s'.format(int(remaining))
+            elif remaining < 3600:
+                nxt = '{}m'.format(int(remaining // 60))
+            else:
+                nxt = '{}h'.format(int(remaining // 3600))
+            age_str = '{}/{}'.format(age_str, nxt)
         else:
             age_str = '--'
 
-        return 'O{}ms R{}ms S{} {}'.format(off, rtt, strat, age_str)
+        return 'O{}ms S{} {}'.format(off, strat, age_str)
 
     def _render_time(self, time_str, start_y, now_ticks):
         """Render HH:MM:SS with transitions."""
