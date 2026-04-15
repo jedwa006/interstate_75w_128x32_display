@@ -5,28 +5,40 @@ A smooth-scrolling NTP clock display for the [Pimoroni Interstate 75W (RP2350)](
 ## Features
 
 - **24-hour NTP-synced time** with large 10x14 pixel digits
+- **Milliseconds display** with confidence-based dimming (fades as accuracy decreases)
 - **Smooth digit transitions** — vertical scroll, crossfade, or snap
-- **Date display** above the time in compact format (ISO, short, or day-first)
+- **Date display** above the time in compact format (ISO, short, day-first, or debug)
+- **Debug mode** — shows NTP offset, RTT, stratum, sync age, and ISO week number
 - **NTP status bar** with sync indicator, offset bar, GMT offset, and stratum
+- **Custom NTP client** — real stratum from server response, RTT-based offset measurement
+- **Adaptive NTP sync** — learns crystal drift rate over first 3 syncs, then calculates optimal resync interval to stay under 20ms offset
 - **Automatic DST** with US and EU rule sets
+- **Night mode** — auto-dims and shifts to warm amber between sunset and sunrise
+  - Astronomical sunrise/sunset calculation (NOAA algorithm) with IP geolocation
+  - Fallback to configurable fixed hours
+  - Pixel-art sun horizon animation during transitions
+  - "Green flash" effect: sea-green bloom wave seeds a Game of Life that evolves and fades
+  - Boot animation: sunrise → sunset → green flash sequence on power-up
 - **6 color themes** — White, Green, Amber, Red, Blue, Cyan
-- **On-device menu** via physical buttons for runtime configuration
+- **Configurable panel color order** — supports RGB, RBG, GRB, GBR, BRG, BGR
+- **On-device menu** via physical buttons with position indicators for blind navigation
 - **WiFi auto-reconnect** with exponential backoff
-- **Periodic NTP resync** (configurable interval, default 1 hour)
 - **RGB LED status** — WiFi/sync state with auto-dim after 30s
 
 ## Display Layout
 
 ```
  ┌──────────────────────────────────────────────────────────────┐
- │                      2026-04-14                              │  <- date (tiny font)
+ │ 04-15-26 W16              O12ms S1 2m/3m                    │  <- date + debug info
  │                                                              │
- │              1 9 : 4 3 : 0 2                                 │  <- time (large font)
+ │              1 9 : 4 3 : 0 2 .547                           │  <- time + ms
  │                                                              │
  │ ─────────────────────────────────────────────────────────── │  <- separator
  │ [SYNC]  GMT-6  ····|····  2  [STRAT]                        │  <- NTP status
  └──────────────────────────────────────────────────────────────┘
 ```
+The top line cycles between date formats via the menu (ISO, short, day, debug).
+Milliseconds dim as NTP confidence decreases between syncs.
 
 ## Hardware
 
@@ -143,6 +155,7 @@ Open `simulator.html` in any browser to preview and experiment with the display 
 │   ├── fonts.py             # 5x7 and 3x5 pixel font bitmaps
 │   ├── ntp_manager.py       # WiFi, NTP sync, DST, LED status
 │   ├── clock_display.py     # Display rendering engine
+│   ├── night_mode.py        # Sunset/sunrise, night dimming, animations
 │   └── menu.py              # On-screen button menu
 └── docs/
     └── configuration.md     # Full settings reference

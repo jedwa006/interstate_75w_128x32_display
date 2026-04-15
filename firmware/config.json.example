@@ -13,5 +13,11 @@
   "colon_style": "blink",
   "date_format": "iso",
   "transition_mode": "scroll",
-  "color_order": "RBG"
+  "color_order": "RBG",
+  "night_mode_enabled": true,
+  "sunset_hour": 20,
+  "sunrise_hour": 7,
+  "night_brightness_pct": 50,
+  "lat": 0,
+  "lon": 0
 }
