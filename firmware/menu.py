@@ -1,5 +1,5 @@
 import time
-from fonts import draw_tiny_str, draw_tiny_centered, tiny_str_width
+from fonts import draw_tiny, draw_tiny_str, draw_tiny_centered, tiny_str_width
 
 COLS = 128
 AUTO_HIDE_MS = 5000  # hide menu after 5s of no input
@@ -8,7 +8,7 @@ MENU_ITEMS = (
     ("BRIGHT", "brightness", (10, 25, 50, 75, 85, 100)),
     ("COLOR", "color_preset", ("WHITE", "GREEN", "AMBER", "RED", "BLUE", "CYAN")),
     ("COLON", "colon_style", ("blink", "pulse", "solid")),
-    ("DATE", "date_format", ("iso", "short", "day")),
+    ("DATE", "date_format", ("iso", "short", "day", "debug")),
     ("TRANS", "transition_mode", ("scroll", "crossfade", "snap")),
     ("UTC", "utc_offset", tuple(range(-12, 15))),
     ("DST", "dst_enabled", (True, False)),
@@ -39,9 +39,11 @@ class Menu:
         self.cursor = 0
         self.last_input_ticks = 0
 
-        # Debounce
+        # Debounce: track previous state + minimum time between actions
         self._last_a = False
         self._last_b = False
+        self._last_action_ticks = 0
+        self._debounce_ms = 200  # minimum ms between button actions
 
         # Pens
         self.pen_bg = self.g.create_pen(0, 0, 0)
@@ -65,6 +67,11 @@ class Menu:
                 self._deactivate()
             return self.active
 
+        # Debounce: ignore edges that come too fast
+        if time.ticks_diff(now, self._last_action_ticks) < self._debounce_ms:
+            return self.active
+
+        self._last_action_ticks = now
         self.last_input_ticks = now
 
         if not self.active:
@@ -156,6 +163,28 @@ class Menu:
 
         # Navigation hint
         draw_tiny_centered(self.g, "A=NEXT  B=SET", 24, self.pen_label)
+
+        # Button position indicators on right edge
+        # Physical buttons are on the back, so mirrored from front view:
+        # Looking at display: B is left, A is right
+        # Indicators: 2px wide, 4px tall, spaced 2px apart
+        # Starting ~32px from right edge = x=96
+        btn_x = 108
+        btn_w = 2
+        btn_h = 4
+        btn_gap = 2
+        btn_y = 0  # top edge
+
+        # B indicator (left)
+        self.g.set_pen(self.pen_label)
+        self.g.rectangle(btn_x, btn_y, btn_w, btn_h)
+        # A indicator (right of B)
+        self.g.set_pen(self.pen_highlight)
+        self.g.rectangle(btn_x + btn_w + btn_gap, btn_y, btn_w, btn_h)
+
+        # Tiny labels
+        draw_tiny(self.g, 'B', btn_x - 4, btn_y, self.pen_label)
+        draw_tiny(self.g, 'A', btn_x + btn_w + btn_gap + btn_w + 1, btn_y, self.pen_highlight)
 
     def _get_value_str(self, key, values):
         """Get display string for current value."""

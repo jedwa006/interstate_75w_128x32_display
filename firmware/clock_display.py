@@ -61,9 +61,13 @@ class ClockDisplay:
         year, month, day, hour, minute, second, weekday = local_time
         now_ticks = time.ticks_ms()
 
-        # Date (tiny font, row 0)
-        date_str = self._format_date(year, month, day, weekday)
-        draw_tiny_centered(self.g, date_str, 0, self.pen_dim)
+        # Top line: date or debug info (tiny font, row 0)
+        fmt = self.config.get("date_format", "iso")
+        if fmt == "debug":
+            top_str = self._format_debug()
+        else:
+            top_str = self._format_date(year, month, day, weekday)
+        draw_tiny_centered(self.g, top_str, 0, self.pen_dim)
 
         # Time (large font, row 7)
         time_str = "{:02d}:{:02d}:{:02d}".format(hour, minute, second)
@@ -82,6 +86,26 @@ class ClockDisplay:
             return "{} {} {:02d}".format(day_name, month_name, day)
         # "day" format
         return "{} {:02d} {}".format(day_name, day, month_name)
+
+    def _format_debug(self):
+        """Format debug line: offset, RTT, stratum, time since sync."""
+        off = self.ntp.get_offset_ms()
+        rtt = self.ntp.rtt_ms
+        strat = self.ntp.stratum
+
+        # Time since last sync
+        if self.ntp.last_sync_time > 0:
+            age_s = time.time() - self.ntp.last_sync_time
+            if age_s < 60:
+                age_str = '{}s'.format(age_s)
+            elif age_s < 3600:
+                age_str = '{}m'.format(age_s // 60)
+            else:
+                age_str = '{}h'.format(age_s // 3600)
+        else:
+            age_str = '--'
+
+        return 'O{}ms R{}ms S{} {}'.format(off, rtt, strat, age_str)
 
     def _render_time(self, time_str, start_y, now_ticks):
         """Render HH:MM:SS with transitions."""

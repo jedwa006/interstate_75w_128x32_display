@@ -5,9 +5,14 @@ import socket
 import machine
 
 
-# NTP epoch is 1900-01-01, MicroPython epoch is 2000-01-01
-# Difference in seconds: 70 years worth (including leap years)
-NTP_DELTA = 3155673600
+# NTP epoch is 1900-01-01. MicroPython epoch varies by build:
+# - Some builds use 2000-01-01 (delta = 3155673600)
+# - Some builds use 1970-01-01 Unix epoch (delta = 2208988800)
+# Detect at import time:
+import time as _time
+_NTP_TO_UNIX = 2208988800
+_NTP_TO_2000 = 3155673600
+NTP_DELTA = _NTP_TO_UNIX if _time.gmtime(0)[0] == 1970 else _NTP_TO_2000
 
 
 class NTPManager:

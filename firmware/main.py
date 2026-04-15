@@ -68,18 +68,19 @@ def check_menu():
     a_pressed = i75.switch_pressed(0)
     b_pressed = i75.switch_pressed(1)
 
-    if not a_pressed and not b_pressed:
-        return False
-
-    # Lazy-load menu module
-    if menu is None:
+    # Lazy-load menu module on first button press
+    if (a_pressed or b_pressed) and menu is None:
         try:
             from menu import Menu
             menu = Menu(i75, graphics, config, ntp)
         except ImportError:
             return False
 
-    return menu.handle_input(a_pressed, b_pressed)
+    # Always call handle_input if menu exists (it tracks active state + auto-hide)
+    if menu is not None:
+        return menu.handle_input(a_pressed, b_pressed)
+
+    return False
 
 
 # --- Main ---
