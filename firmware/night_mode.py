@@ -219,121 +219,176 @@ class NightMode:
         W = 128
         H = 32
 
-        # --- Phase 1: Initial flash burst (3 frames) ---
-        for step in range(3):
-            p = step / 2.0
-            radius = int(2 + p * 4)
-            alpha = 0.8 - p * 0.2
+        # --- Phase 1: Smooth bloom wave sweep ---
+        # A radial gradient arc expands outward from the horizon point,
+        # leaving GOL seed cells in its wake like sparks from a shockwave.
+        grid = bytearray(W * H)
+        buf = bytearray(W * H)
 
-            gr = int(20 * alpha)
-            gg = int(200 * alpha)
-            gb = int(120 * alpha)
+        BLOOM_FRAMES = 18
+        BLOOM_MAX_R = 75
+        BLOOM_WIDTH = 10
+        BLOOM_TRAIL = 16
+
+        # Per-pixel hash for non-patterned, non-symmetric seeding
+        # Uses a mixing function on actual x,y,frame — not distance-based
+        def _pixel_hash(x, y, f):
+            # Robert Jenkins' 32-bit mix (simplified)
+            h = x * 374761393 + y * 668265263 + f * 1274126177
+            h = ((h >> 16) ^ h) * 0x45d9f3b
+            h = ((h >> 16) ^ h)
+            return h & 0xFF
+
+        for frame in range(BLOOM_FRAMES):
+            p = frame / (BLOOM_FRAMES - 1)
+            front_r = int(3 + p * BLOOM_MAX_R)
+            trail_r = max(0, front_r - BLOOM_TRAIL)
+            front_sq = front_r * front_r
+            inner_sq = max(0, front_r - BLOOM_WIDTH) ** 2
+            trail_sq = trail_r * trail_r
 
             graphics.set_pen(graphics.create_pen(0, 0, 0))
             graphics.clear()
 
-            pen = graphics.create_pen(gr, gg, gb)
-            graphics.set_pen(pen)
-            for dy in range(-radius, 1):
-                for dx in range(-radius, radius + 1):
-                    if dx * dx + dy * dy <= radius * radius:
-                        px, py = sun_cx + dx, sun_cy + dy
-                        if 0 <= py < H and 0 <= px < W:
-                            graphics.pixel(px, py)
+            # Draw bloom arc and seed cells in one pass
+            for y in range(H):
+                dy = y - sun_cy
+                if dy > 0:
+                    continue
+                dy_sq = dy * dy
+                if dy_sq > (front_r + 2) ** 2:
+                    continue
+                row = y * W
+                for x in range(W):
+                    dx = x - sun_cx
+                    dist_sq = dx * dx + dy_sq
+
+                    if dist_sq > (front_r + 2) ** 2:
+                        continue
+                    if dist_sq < trail_sq:
+                        continue
+
+                    dist = math.sqrt(dist_sq)
+
+                    if dist > front_r + 1 or dist < trail_r:
+                        continue
+
+                    # Brightness
+                    if dist <= front_r and dist >= front_r - BLOOM_WIDTH:
+                        band_pos = (front_r - dist) / BLOOM_WIDTH
+                        alpha = (1.0 - band_pos * 0.6) * (0.4 + 0.6 * (1 - p * 0.5))
+                    elif dist < front_r - BLOOM_WIDTH:
+                        trail_span = max(1, front_r - BLOOM_WIDTH - trail_r)
+                        alpha = ((dist - trail_r) / trail_span) * 0.15
+                    else:
+                        continue
+
+                    if alpha < 0.02:
+                        continue
+
+                    cr = int(30 * alpha)
+                    cg = int(240 * alpha)
+                    cb = int(140 * alpha)
+                    if cr > 0 or cg > 0 or cb > 0:
+                        graphics.set_pen(graphics.create_pen(cr, cg, cb))
+                        graphics.pixel(x, y)
+
+                    # Seed where the bloom is bright (in the arc band)
+                    if alpha > 0.15:
+                        if _pixel_hash(x, y, frame) < 50:  # ~20%
+                            if grid[row + x] == 0:
+                                grid[row + x] = 1
+
+            # Render seed cells on top — these ARE the GOL starting state
+            seed_pen = graphics.create_pen(20, 200, 110)
+            for y in range(H):
+                row = y * W
+                for x in range(W):
+                    if grid[row + x] > 0:
+                        graphics.set_pen(seed_pen)
+                        graphics.pixel(x, y)
+
             i75.update()
-            t.sleep_ms(50)
+            t.sleep_ms(40)
 
-        # --- Phase 2: GOL with aging cells and wide expanding wave ---
-        # Grid stores cell age: 0=dead, 1+=alive (age in generations)
-        # Cells die after MAX_AGE — prevents oscillators
-        grid = bytearray(W * H)
-        buf = bytearray(W * H)
+        # --- Phase 2: GOL evolution ---
+        MAX_AGE = 5
+        MAX_GENS = 80
+        STALE_CHECK_GEN = 30
+        STALE_WINDOW = 4
 
-        MAX_AGE = 5        # cells die after this many gens
-        MAX_GENS = 80      # generous cap (~30s at 30ms/frame + evolution time)
-        WAVE_SPEED = 10    # pixels of wave expansion per gen (wider sweep)
-        SEED_GENS = 7      # how many gens to keep seeding
-        STALE_CHECK_GEN = 30  # start checking for oscillators after this gen
-        STALE_WINDOW = 4      # compare population over this many gens
-
-        # Pre-compute color LUT
         age_pens = [None] * (MAX_AGE + 1)
-        # Wave front bloom pen (brighter leading edge)
-        bloom_pen = None
-
-        # Population history for oscillator detection
+        glow_pens = [None] * (MAX_AGE + 1)
         pop_history = []
+        prev_live = 999
 
         for gen in range(MAX_GENS):
             fade = 1.0 - (gen / MAX_GENS) * 0.75
 
-            # Build pen LUT for this generation
+            # Glow intensifies as population shrinks
+            glow_boost = 1.0
+            if prev_live < 30:
+                glow_boost = 2.0
+            elif prev_live < 80:
+                glow_boost = 1.5
+
             for a in range(1, MAX_AGE + 1):
                 life = 1.0 - ((a - 1) / MAX_AGE)
                 v = life * fade
                 age_pens[a] = graphics.create_pen(int(15 * v), int(200 * v), int(110 * v))
+                # Glow pen: dimmer version for dither halo
+                gv = v * 0.12 * glow_boost
+                glow_pens[a] = graphics.create_pen(int(5 * gv), int(70 * gv), int(40 * gv))
             black = graphics.create_pen(0, 0, 0)
-            # Bloom: bright leading edge for newborn cells during wave phase
-            bv = fade * 0.9
-            bloom_pen = graphics.create_pen(int(40 * bv), int(255 * bv), int(160 * bv))
 
-            # --- Seed wave front with bloom ---
-            if gen < SEED_GENS:
-                wave_r = 4 + gen * WAVE_SPEED
-                inner_r = max(0, wave_r - 3)
-                inner_sq = inner_r * inner_r
-                outer_sq = wave_r * wave_r
-                for dy in range(-min(wave_r, sun_cy), 1):
-                    py = sun_cy + dy
-                    if py < 0 or py >= H:
-                        continue
-                    dy_sq = dy * dy
-                    if dy_sq > outer_sq:
-                        continue
-                    max_dx = int(math.sqrt(outer_sq - dy_sq))
-                    min_dx = int(math.sqrt(inner_sq - dy_sq)) if dy_sq < inner_sq else 0
-                    for dx in range(-max_dx, max_dx + 1):
-                        adx = abs(dx)
-                        if adx < min_dx:
-                            continue
-                        px = sun_cx + dx
-                        if 0 <= px < W:
-                            if ((px * 7 + py * 13 + gen * 11) % 10) < 3:
-                                idx = py * W + px
-                                if grid[idx] == 0:
-                                    grid[idx] = 1
-
-            # --- Render ---
+            # --- Render: cells + dither glow ---
             graphics.set_pen(black)
             graphics.clear()
 
+            # First pass: draw glow halos around living cells
+            # Dither pattern alternates based on gen for flicker effect
+            for y in range(H):
+                row = y * W
+                for x in range(W):
+                    a = grid[row + x]
+                    if a > 0:
+                        gp = glow_pens[a]
+                        if gp is None:
+                            continue
+                        graphics.set_pen(gp)
+                        # Draw dithered halo in 4 cardinal + 4 diagonal neighbors
+                        for ny in range(max(0, y-1), min(H, y+2)):
+                            for nx in range(max(0, x-1), min(W, x+2)):
+                                if ny == y and nx == x:
+                                    continue
+                                if grid[ny * W + nx] > 0:
+                                    continue  # don't glow over other live cells
+                                # Dither: checkerboard shifted by gen for flicker
+                                if ((nx + ny + gen) & 1) == 0:
+                                    graphics.pixel(nx, ny)
+
+            # Second pass: draw live cells on top
             live_count = 0
-            seeding = gen < SEED_GENS
             for y in range(H):
                 row = y * W
                 for x in range(W):
                     a = grid[row + x]
                     if a > 0:
                         live_count += 1
-                        # Newborn cells (age 1) during wave phase get bloom color
-                        if seeding and a == 1:
-                            graphics.set_pen(bloom_pen)
-                        else:
-                            pen = age_pens[a]
-                            if pen is not None:
-                                graphics.set_pen(pen)
-                            else:
-                                continue
-                        graphics.pixel(x, y)
+                        pen = age_pens[a]
+                        if pen is not None:
+                            graphics.set_pen(pen)
+                            graphics.pixel(x, y)
 
+            prev_live = live_count
             i75.update()
 
             # Track population for oscillator detection
             pop_history.append(live_count)
 
             # --- Exit conditions ---
-            # 1. All dead after seeding phase
-            if live_count == 0 and gen >= SEED_GENS:
+            # 1. All dead (seeding already happened in phase 1)
+            if live_count == 0:
                 break
 
             # 2. Oscillator detection: if population repeats over STALE_WINDOW
