@@ -1,0 +1,28 @@
+# WiFi credentials and secrets
+firmware/secrets.py
+firmware/config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# MicroPython
+*.mpy
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (for local dev server if used with simulator)
+node_modules/
+
+# Claude Code
+.claude/

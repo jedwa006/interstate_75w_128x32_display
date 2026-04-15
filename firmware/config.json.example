@@ -1,0 +1,16 @@
+{
+  "wifi_ssid": "YourNetworkName",
+  "wifi_password": "YourPassword",
+  "ntp_server": "pool.ntp.org",
+  "ntp_sync_interval": 3600,
+  "utc_offset": -6,
+  "dst_enabled": true,
+  "dst_rules": "US",
+  "color_r": 255,
+  "color_g": 255,
+  "color_b": 240,
+  "brightness": 85,
+  "colon_style": "blink",
+  "date_format": "iso",
+  "transition_mode": "scroll"
+}

@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>128x32 LED Matrix Simulator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.2em;
+    color: #888;
+    margin-bottom: 8px;
+    font-weight: 400;
+  }
+  .display-wrapper {
+    background: #0d0d0d;
+    border: 3px solid #333;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 0 40px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,0,0,0.3);
+    margin-bottom: 24px;
+  }
+  canvas#matrix {
+    display: block;
+    image-rendering: pixelated;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    max-width: 900px;
+    width: 100%;
+  }
+  .control-group {
+    background: #16213e;
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .control-group h3 {
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #666;
+    margin-bottom: 8px;
+  }
+  label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85em;
+    margin-bottom: 6px;
+  }
+  select, input[type="range"], input[type="color"] {
+    background: #0a0a1a;
+    color: #e0e0e0;
+    border: 1px solid #333;
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: 0.85em;
+  }
+  select { width: 130px; cursor: pointer; }
+  input[type="range"] { width: 120px; cursor: pointer; }
+  input[type="color"] { width: 40px; height: 26px; padding: 1px; cursor: pointer; }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 0.85em;
+  }
+  input[type="checkbox"] { cursor: pointer; }
+  .stats {
+    font-size: 0.75em;
+    color: #555;
+    margin-top: 8px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<h1>Interstate 75W &mdash; 128&times;32 LED Matrix Simulator</h1>
+<div class="display-wrapper">
+  <canvas id="matrix"></canvas>
+</div>
+
+<div class="controls">
+  <div class="control-group">
+    <h3>Theme</h3>
+    <label>Preset
+      <select id="theme">
+        <option value="green">Classic Green</option>
+        <option value="amber">Amber / Orange</option>
+        <option value="red">Red</option>
+        <option value="white" selected>White</option>
+        <option value="blue">Blue</option>
+        <option value="cyan">Cyan</option>
+        <option value="custom">Custom</option>
+      </select>
+    </label>
+    <label>Custom Color <input type="color" id="customColor" value="#ffffff"></label>
+    <label>Accent Color <input type="color" id="accentColor" value="#00aaff"></label>
+  </div>
+
+  <div class="control-group">
+    <h3>Transition</h3>
+    <label>Mode
+      <select id="transitionMode">
+        <option value="scroll" selected>Vertical Scroll</option>
+        <option value="crossfade">Crossfade</option>
+        <option value="snap">Snap</option>
+      </select>
+    </label>
+    <label>Colon Style
+      <select id="colonStyle">
+        <option value="solid">Solid</option>
+        <option value="blink" selected>Blink</option>
+        <option value="pulse">Pulse</option>
+      </select>
+    </label>
+    <label>Speed
+      <select id="speed">
+        <option value="1" selected>1x (Real time)</option>
+        <option value="10">10x</option>
+        <option value="60">60x</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="control-group">
+    <h3>Display</h3>
+    <label>Brightness <input type="range" id="brightness" min="10" max="100" value="85"></label>
+    <label>LED Size <input type="range" id="ledSize" min="2" max="8" value="5"></label>
+    <label>Glow Intensity <input type="range" id="glowIntensity" min="0" max="100" value="40"></label>
+    <label>Date
+      <select id="dateMode">
+        <option value="off" selected>Off</option>
+        <option value="small">Small (above)</option>
+        <option value="cycle">Cycle (alt)</option>
+      </select>
+    </label>
+    <label>Date Fmt
+      <select id="dateFormat">
+        <option value="iso" selected>2026-04-14</option>
+        <option value="short">MON APR 14</option>
+        <option value="day">MON 14 APR</option>
+      </select>
+    </label>
+    <div class="toggle-row"><input type="checkbox" id="showPanelBoundary" checked><span>Panel boundary</span></div>
+    <div class="toggle-row"><input type="checkbox" id="showNTP" checked><span>NTP indicators</span></div>
+  </div>
+
+  <div class="control-group">
+    <h3>NTP Status (simulated)</h3>
+    <label>Offset (ms) <input type="range" id="ntpOffset" min="-50" max="50" value="3"></label>
+    <label>Stratum <input type="range" id="ntpStratum" min="1" max="5" value="2"></label>
+    <div class="toggle-row"><input type="checkbox" id="ntpSynced" checked><span>Sync locked</span></div>
+  </div>
+</div>
+
+<div class="stats" id="stats"></div>
+
+<script>
+// ============================================================
+//  CONFIG & STATE
+// ============================================================
+const COLS = 128, ROWS = 32;
+
+const THEMES = {
+  green:  { r: 0,   g: 255, b: 50  },
+  amber:  { r: 255, g: 160, b: 0   },
+  red:    { r: 255, g: 30,  b: 10  },
+  white:  { r: 255, g: 255, b: 240 },
+  blue:   { r: 40,  g: 80,  b: 255 },
+  cyan:   { r: 0,   g: 230, b: 220 },
+};
+
+let cfg = {
+  theme: 'white',
+  customColor: { r: 255, g: 255, b: 255 },
+  accentColor: { r: 0, g: 170, b: 255 },
+  transitionMode: 'scroll',
+  colonStyle: 'blink',
+  speed: 1,
+  brightness: 0.85,
+  ledSize: 5,
+  glowIntensity: 0.4,
+  showPanelBoundary: true,
+  showNTP: true,
+  ntpOffset: 3,
+  ntpStratum: 2,
+  ntpSynced: true,
+  dateMode: 'off',    // off, small, cycle
+  dateFormat: 'iso',  // iso, short, day
+};
+
+function getColor() {
+  if (cfg.theme === 'custom') return cfg.customColor;
+  return THEMES[cfg.theme];
+}
+
+// ============================================================
+//  PIXEL FONT — 5x7 bitmaps for digits 0-9 and symbols
+// ============================================================
+const FONT_W = 5, FONT_H = 7;
+const FONT = {
+  '0': [
+    0b01110,
+    0b10001,
+    0b10011,
+    0b10101,
+    0b11001,
+    0b10001,
+    0b01110,
+  ],
+  '1': [
+    0b00100,
+    0b01100,
+    0b00100,
+    0b00100,
+    0b00100,
+    0b00100,
+    0b01110,
+  ],
+  '2': [
+    0b01110,
+    0b10001,
+    0b00001,
+    0b00110,
+    0b01000,
+    0b10000,
+    0b11111,
+  ],
+  '3': [
+    0b01110,
+    0b10001,
+    0b00001,
+    0b00110,
+    0b00001,
+    0b10001,
+    0b01110,
+  ],
+  '4': [
+    0b00010,
+    0b00110,
+    0b01010,
+    0b10010,
+    0b11111,
+    0b00010,
+    0b00010,
+  ],
+  '5': [
+    0b11111,
+    0b10000,
+    0b11110,
+    0b00001,
+    0b00001,
+    0b10001,
+    0b01110,
+  ],
+  '6': [
+    0b00110,
+    0b01000,
+    0b10000,
+    0b11110,
+    0b10001,
+    0b10001,
+    0b01110,
+  ],
+  '7': [
+    0b11111,
+    0b00001,
+    0b00010,
+    0b00100,
+    0b01000,
+    0b01000,
+    0b01000,
+  ],
+  '8': [
+    0b01110,
+    0b10001,
+    0b10001,
+    0b01110,
+    0b10001,
+    0b10001,
+    0b01110,
+  ],
+  '9': [
+    0b01110,
+    0b10001,
+    0b10001,
+    0b01111,
+    0b00001,
+    0b00010,
+    0b01100,
+  ],
+  ':': [
+    0b00000,
+    0b00100,
+    0b00100,
+    0b00000,
+    0b00100,
+    0b00100,
+    0b00000,
+  ],
+  '-': [
+    0b00000,
+    0b00000,
+    0b00000,
+    0b11111,
+    0b00000,
+    0b00000,
+    0b00000,
+  ],
+  ' ': [0,0,0,0,0,0,0],
+  A: [0b01110,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
+  B: [0b11110,0b10001,0b10001,0b11110,0b10001,0b10001,0b11110],
+  C: [0b01110,0b10001,0b10000,0b10000,0b10000,0b10001,0b01110],
+  D: [0b11100,0b10010,0b10001,0b10001,0b10001,0b10010,0b11100],
+  E: [0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b11111],
+  F: [0b11111,0b10000,0b10000,0b11110,0b10000,0b10000,0b10000],
+  G: [0b01110,0b10001,0b10000,0b10111,0b10001,0b10001,0b01110],
+  H: [0b10001,0b10001,0b10001,0b11111,0b10001,0b10001,0b10001],
+  I: [0b01110,0b00100,0b00100,0b00100,0b00100,0b00100,0b01110],
+  J: [0b00111,0b00010,0b00010,0b00010,0b00010,0b10010,0b01100],
+  K: [0b10001,0b10010,0b10100,0b11000,0b10100,0b10010,0b10001],
+  L: [0b10000,0b10000,0b10000,0b10000,0b10000,0b10000,0b11111],
+  M: [0b10001,0b11011,0b10101,0b10101,0b10001,0b10001,0b10001],
+  N: [0b10001,0b11001,0b10101,0b10011,0b10001,0b10001,0b10001],
+  O: [0b01110,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
+  P: [0b11110,0b10001,0b10001,0b11110,0b10000,0b10000,0b10000],
+  R: [0b11110,0b10001,0b10001,0b11110,0b10100,0b10010,0b10001],
+  S: [0b01110,0b10001,0b10000,0b01110,0b00001,0b10001,0b01110],
+  T: [0b11111,0b00100,0b00100,0b00100,0b00100,0b00100,0b00100],
+  U: [0b10001,0b10001,0b10001,0b10001,0b10001,0b10001,0b01110],
+  V: [0b10001,0b10001,0b10001,0b10001,0b01010,0b01010,0b00100],
+  W: [0b10001,0b10001,0b10001,0b10101,0b10101,0b11011,0b10001],
+  Y: [0b10001,0b10001,0b01010,0b00100,0b00100,0b00100,0b00100],
+};
+
+// Return array of {x, y} for lit pixels of a character at given position
+function getCharPixels(ch, ox, oy) {
+  const bitmap = FONT[ch];
+  if (!bitmap) return [];
+  const pts = [];
+  for (let row = 0; row < FONT_H; row++) {
+    for (let col = 0; col < FONT_W; col++) {
+      if (bitmap[row] & (1 << (FONT_W - 1 - col))) {
+        pts.push({ x: ox + col, y: oy + row });
+      }
+    }
+  }
+  return pts;
+}
+
+// ============================================================
+//  LARGE FONT — 10x14 (double-size digits for better visibility)
+// ============================================================
+// We'll scale the 5x7 font by 2x for the main time, giving 10x14
+function getCharPixelsScaled(ch, ox, oy, scale) {
+  const bitmap = FONT[ch];
+  if (!bitmap) return [];
+  const pts = [];
+  for (let row = 0; row < FONT_H; row++) {
+    for (let col = 0; col < FONT_W; col++) {
+      if (bitmap[row] & (1 << (FONT_W - 1 - col))) {
+        for (let sy = 0; sy < scale; sy++) {
+          for (let sx = 0; sx < scale; sx++) {
+            pts.push({ x: ox + col * scale + sx, y: oy + row * scale + sy });
+          }
+        }
+      }
+    }
+  }
+  return pts;
+}
+
+// ============================================================
+//  FRAMEBUFFER — 128x32 array of {r, g, b} (0.0 - 1.0 intensity)
+// ============================================================
+let fb = [];
+function clearFb() {
+  fb = new Array(ROWS);
+  for (let y = 0; y < ROWS; y++) {
+    fb[y] = new Array(COLS);
+    for (let x = 0; x < COLS; x++) {
+      fb[y][x] = { r: 0, g: 0, b: 0 };
+    }
+  }
+}
+clearFb();
+
+function setPixel(x, y, r, g, b) {
+  x = x | 0; y = y | 0; // floor to integer
+  if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return;
+  fb[y][x].r = Math.min(1, fb[y][x].r + r);
+  fb[y][x].g = Math.min(1, fb[y][x].g + g);
+  fb[y][x].b = Math.min(1, fb[y][x].b + b);
+}
+
+function drawChar(ch, ox, oy, color, alpha) {
+  const a = alpha != null ? alpha : 1;
+  const pts = getCharPixelsScaled(ch, ox, oy, 2);
+  const c = color || getColor();
+  pts.forEach(p => {
+    setPixel(p.x, p.y, (c.r / 255) * a, (c.g / 255) * a, (c.b / 255) * a);
+  });
+}
+
+function drawCharSmall(ch, ox, oy, color, alpha) {
+  const a = alpha != null ? alpha : 1;
+  const pts = getCharPixels(ch, ox, oy);
+  const c = color || getColor();
+  pts.forEach(p => {
+    setPixel(p.x, p.y, (c.r / 255) * a, (c.g / 255) * a, (c.b / 255) * a);
+  });
+}
+
+// Draw a string of characters using scaled font
+function drawString(str, ox, oy, color, alpha, scale) {
+  const s = scale || 2;
+  const spacing = FONT_W * s + (s > 1 ? 2 : 1);
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (s === 1) {
+      drawCharSmall(ch, ox + i * spacing, oy, color, alpha);
+    } else {
+      drawChar(ch, ox + i * spacing, oy, color, alpha);
+    }
+  }
+}
+
+// ============================================================
+//  TIME LOGIC
+// ============================================================
+let timeBase = Date.now();
+let perfBase = performance.now();
+
+function getSimTime() {
+  const elapsed = (performance.now() - perfBase) * cfg.speed;
+  return timeBase + elapsed;
+}
+
+function formatTime(ms) {
+  const d = new Date(ms);
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  const s = String(d.getSeconds()).padStart(2, '0');
+  return { h, m, s, ms: d.getMilliseconds(), frac: d.getMilliseconds() / 1000 };
+}
+
+const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+const DAYS = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+
+function formatDate(ms) {
+  const d = new Date(ms);
+  const year = String(d.getFullYear());
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const dayName = DAYS[d.getDay()];
+  const monthName = MONTHS[d.getMonth()];
+
+  if (cfg.dateFormat === 'iso') return year + '-' + month + '-' + day;
+  if (cfg.dateFormat === 'short') return dayName + ' ' + monthName + ' ' + day;
+  return dayName + ' ' + day + ' ' + monthName; // 'day' format
+}
+
+// ============================================================
+//  TRANSITION RENDERING
+// ============================================================
+
+// Per-digit transition state: tracks when each position last changed
+// and what the previous character was
+const digitSlots = {}; // keyed by position index
+// Each slot: { prevCh, newCh, startTime }
+const ANIM_DURATION = 400; // ms for scroll/crossfade animation
+
+function getDigitTransition(i, ch, nowMs) {
+  if (!digitSlots[i]) {
+    digitSlots[i] = { prevCh: ch, newCh: ch, startTime: 0 };
+  }
+  const slot = digitSlots[i];
+  if (ch !== slot.newCh) {
+    // Digit changed — start new animation
+    slot.prevCh = slot.newCh;
+    slot.newCh = ch;
+    slot.startTime = nowMs;
+  }
+  const elapsed = nowMs - slot.startTime;
+  const progress = slot.startTime === 0 ? 1 : Math.min(1, elapsed / ANIM_DURATION);
+  return { prevCh: slot.prevCh, newCh: slot.newCh, progress };
+}
+
+// Cycle mode: 5s time, 3s date
+const CYCLE_TIME_SHOW = 5000;
+const CYCLE_DATE_SHOW = 3000;
+const CYCLE_FADE = 400; // ms crossfade between time/date
+
+function renderTimeScroll(now) {
+  const t = formatTime(now);
+  const timeStr = `${t.h}:${t.m}:${t.s}`;
+  const frac = t.frac; // 0..1 within current second
+  const color = getColor();
+  const nowPerf = performance.now(); // real wall clock for animations
+  const dateStr = formatDate(now);
+
+  // Digit scale and layout
+  const scale = 2;
+  const charW = FONT_W * scale;
+  const gap = 2; // gap between characters
+  const colonW = FONT_W * scale;
+
+  // Total width: 8 chars (HH:MM:SS) * (charW + gap) - gap
+  const totalW = 8 * (charW + gap) - gap;
+  const startX = Math.floor((COLS - totalW) / 2);
+
+  // Vertical positioning depends on date mode
+  const charH = FONT_H * scale;
+  const tinyH = 5; // tiny font height
+  let startY;
+
+  if (cfg.dateMode === 'small') {
+    // Date above: tiny font at row 0, time pushed down
+    startY = tinyH + 2; // 7px down
+  } else if (cfg.showNTP) {
+    startY = 1;
+  } else {
+    startY = Math.floor((ROWS - charH) / 2);
+  }
+
+  // --- Cycle mode: alternate time/date ---
+  if (cfg.dateMode === 'cycle') {
+    const cyclePeriod = CYCLE_TIME_SHOW + CYCLE_DATE_SHOW;
+    const cyclePos = nowPerf % cyclePeriod;
+    const showingDate = cyclePos >= CYCLE_TIME_SHOW;
+
+    // Calculate crossfade alpha
+    let timeAlpha = 1, dateAlpha = 0;
+    if (showingDate) {
+      const dateElapsed = cyclePos - CYCLE_TIME_SHOW;
+      if (dateElapsed < CYCLE_FADE) {
+        // Fading from time to date
+        const f = dateElapsed / CYCLE_FADE;
+        timeAlpha = 1 - f;
+        dateAlpha = f;
+      } else if (dateElapsed > CYCLE_DATE_SHOW - CYCLE_FADE) {
+        // Fading from date back to time
+        const f = (CYCLE_DATE_SHOW - (dateElapsed - (CYCLE_TIME_SHOW - CYCLE_TIME_SHOW))) / CYCLE_FADE;
+        // Recalculate: remaining time in date phase
+        const remaining = CYCLE_DATE_SHOW - dateElapsed;
+        const f2 = remaining / CYCLE_FADE;
+        timeAlpha = 1 - f2;
+        dateAlpha = f2;
+      } else {
+        timeAlpha = 0;
+        dateAlpha = 1;
+      }
+    } else {
+      if (cyclePos < CYCLE_FADE) {
+        // Just transitioned to time from date
+        const f = cyclePos / CYCLE_FADE;
+        timeAlpha = f;
+        dateAlpha = 1 - f;
+      }
+    }
+
+    // Draw date in big font (centered)
+    if (dateAlpha > 0) {
+      const dateDisplayStr = dateStr;
+      const dateTotalW = dateDisplayStr.length * (charW + gap) - gap;
+      const dateStartX = Math.floor((COLS - dateTotalW) / 2);
+      for (let i = 0; i < dateDisplayStr.length; i++) {
+        const ch = dateDisplayStr[i];
+        const x = dateStartX + i * (charW + gap);
+        drawCharOffset(ch, x, startY, scale, color, dateAlpha);
+      }
+    }
+
+    // Draw time with timeAlpha
+    if (timeAlpha > 0) {
+      renderTimeDigits(timeStr, startX, startY, charW, gap, charH, scale, color, frac, nowPerf, timeAlpha);
+    }
+
+    return { startY, charH, timeStr };
+  }
+
+  // --- Small date mode: tiny font date above time ---
+  if (cfg.dateMode === 'small') {
+    const dateColor = { r: color.r / 255 * 0.4, g: color.g / 255 * 0.4, b: color.b / 255 * 0.4 };
+    drawTinyStrCentered(dateStr, 0, dateColor);
+  }
+
+  renderTimeDigits(timeStr, startX, startY, charW, gap, charH, scale, color, frac, nowPerf, 1);
+
+  return { startY, charH, timeStr };
+}
+
+function renderTimeDigits(timeStr, startX, startY, charW, gap, charH, scale, color, frac, nowPerf, globalAlpha) {
+  for (let i = 0; i < timeStr.length; i++) {
+    const ch = timeStr[i];
+    const x = startX + i * (charW + gap);
+
+    if (ch === ':') {
+      let colonAlpha = 1;
+      if (cfg.colonStyle === 'blink') {
+        colonAlpha = frac < 0.5 ? 1 : 0;
+      } else if (cfg.colonStyle === 'pulse') {
+        colonAlpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.cos(frac * Math.PI * 2));
+      }
+      drawChar(':', x, startY, color, colonAlpha * globalAlpha);
+      continue;
+    }
+
+    const trans = getDigitTransition(i, ch, nowPerf);
+
+    if (trans.progress >= 1 || trans.prevCh === trans.newCh) {
+      drawChar(ch, x, startY, color, globalAlpha);
+    } else {
+      const p = trans.progress;
+      const eased = 1 - Math.pow(1 - p, 3);
+
+      if (cfg.transitionMode === 'scroll') {
+        const offset = eased * (charH + 2);
+        drawCharOffset(trans.prevCh, x, startY - offset, scale, color, (1 - eased) * globalAlpha);
+        drawCharOffset(trans.newCh, x, startY + charH + 2 - offset, scale, color, eased * globalAlpha);
+      } else if (cfg.transitionMode === 'crossfade') {
+        drawChar(trans.prevCh, x, startY, color, (1 - eased) * globalAlpha);
+        drawChar(trans.newCh, x, startY, color, eased * globalAlpha);
+      } else {
+        drawChar(ch, x, startY, color, globalAlpha);
+      }
+    }
+  }
+}
+
+function drawCharOffset(ch, ox, oy, scale, color, alpha) {
+  // Draw character with vertical offset, clipping to display bounds
+  const bitmap = FONT[ch];
+  if (!bitmap) return;
+  for (let row = 0; row < FONT_H; row++) {
+    for (let col = 0; col < FONT_W; col++) {
+      if (bitmap[row] & (1 << (FONT_W - 1 - col))) {
+        for (let sy = 0; sy < scale; sy++) {
+          for (let sx = 0; sx < scale; sx++) {
+            const px = ox + col * scale + sx;
+            const py = oy + row * scale + sy;
+            if (py >= 0 && py < ROWS && px >= 0 && px < COLS) {
+              const c = color || getColor();
+              setPixel(px, py, (c.r / 255) * alpha, (c.g / 255) * alpha, (c.b / 255) * alpha);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ============================================================
+//  NTP STATUS INDICATORS
+// ============================================================
+
+// Helper: draw a 1px border rectangle (outline only)
+function drawRect(x1, y1, x2, y2, r, g, b) {
+  for (let x = x1; x <= x2; x++) {
+    setPixel(x, y1, r, g, b);
+    setPixel(x, y2, r, g, b);
+  }
+  for (let y = y1 + 1; y < y2; y++) {
+    setPixel(x1, y, r, g, b);
+    setPixel(x2, y, r, g, b);
+  }
+}
+
+// Helper: draw a horizontal line
+function drawHLine(x1, x2, y, r, g, b) {
+  for (let x = x1; x <= x2; x++) setPixel(x, y, r, g, b);
+}
+
+// ============================================================
+//  TINY 3x5 PIXEL FONT (for indicators, date, labels)
+// ============================================================
+const TINY = {
+  A: [[0,1,0],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  B: [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,1,0]],
+  C: [[0,1,1],[1,0,0],[1,0,0],[1,0,0],[0,1,1]],
+  D: [[1,1,0],[1,0,1],[1,0,1],[1,0,1],[1,1,0]],
+  E: [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,1,1]],
+  F: [[1,1,1],[1,0,0],[1,1,0],[1,0,0],[1,0,0]],
+  G: [[0,1,1],[1,0,0],[1,0,1],[1,0,1],[0,1,1]],
+  H: [[1,0,1],[1,0,1],[1,1,1],[1,0,1],[1,0,1]],
+  I: [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  J: [[0,0,1],[0,0,1],[0,0,1],[1,0,1],[0,1,0]],
+  K: [[1,0,1],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+  L: [[1,0,0],[1,0,0],[1,0,0],[1,0,0],[1,1,1]],
+  M: [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  N: [[1,0,1],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  O: [[0,1,0],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+  P: [[1,1,0],[1,0,1],[1,1,0],[1,0,0],[1,0,0]],
+  Q: [[0,1,0],[1,0,1],[1,0,1],[1,1,1],[0,1,1]],
+  R: [[1,1,0],[1,0,1],[1,1,0],[1,0,1],[1,0,1]],
+  S: [[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+  T: [[1,1,1],[0,1,0],[0,1,0],[0,1,0],[0,1,0]],
+  U: [[1,0,1],[1,0,1],[1,0,1],[1,0,1],[0,1,0]],
+  V: [[1,0,1],[1,0,1],[1,0,1],[0,1,0],[0,1,0]],
+  W: [[1,0,1],[1,0,1],[1,1,1],[1,1,1],[1,0,1]],
+  X: [[1,0,1],[1,0,1],[0,1,0],[1,0,1],[1,0,1]],
+  Y: [[1,0,1],[1,0,1],[0,1,0],[0,1,0],[0,1,0]],
+  Z: [[1,1,1],[0,0,1],[0,1,0],[1,0,0],[1,1,1]],
+  '0':[[1,1,1],[1,0,1],[1,0,1],[1,0,1],[1,1,1]],
+  '1':[[0,1,0],[1,1,0],[0,1,0],[0,1,0],[1,1,1]],
+  '2':[[1,1,1],[0,0,1],[1,1,1],[1,0,0],[1,1,1]],
+  '3':[[1,1,1],[0,0,1],[1,1,1],[0,0,1],[1,1,1]],
+  '4':[[1,0,1],[1,0,1],[1,1,1],[0,0,1],[0,0,1]],
+  '5':[[1,1,1],[1,0,0],[1,1,1],[0,0,1],[1,1,1]],
+  '6':[[1,1,1],[1,0,0],[1,1,1],[1,0,1],[1,1,1]],
+  '7':[[1,1,1],[0,0,1],[0,0,1],[0,1,0],[0,1,0]],
+  '8':[[1,1,1],[1,0,1],[1,1,1],[1,0,1],[1,1,1]],
+  '9':[[1,1,1],[1,0,1],[1,1,1],[0,0,1],[1,1,1]],
+  '+':[[0,0,0],[0,1,0],[1,1,1],[0,1,0],[0,0,0]],
+  '-':[[0,0,0],[0,0,0],[1,1,1],[0,0,0],[0,0,0]],
+  ' ':[[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]],
+  m: [[0,0,0],[1,1,1],[1,1,1],[1,0,1],[1,0,1]],
+  s: [[0,1,1],[1,0,0],[0,1,0],[0,0,1],[1,1,0]],
+};
+
+function drawTiny(ch, tx, ty, color) {
+  const glyph = TINY[ch];
+  if (!glyph) return;
+  glyph.forEach((row, ri) => {
+    row.forEach((v, ci) => {
+      if (v) setPixel(tx + ci, ty + ri, color.r, color.g, color.b);
+    });
+  });
+}
+
+function drawTinyStr(str, tx, ty, color) {
+  for (let i = 0; i < str.length; i++) {
+    drawTiny(str[i], tx + i * 4, ty, color);
+  }
+}
+
+function tinyStrWidth(str) {
+  return str.length * 4 - 1;
+}
+
+function drawTinyStrCentered(str, ty, color) {
+  const w = tinyStrWidth(str);
+  const tx = Math.floor((COLS - w) / 2);
+  drawTinyStr(str, tx, ty, color);
+}
+
+// ============================================================
+//  NTP STATUS INDICATORS
+// ============================================================
+
+function renderNTPStatus(yBase) {
+  if (!cfg.showNTP) return;
+
+  const y = yBase;
+  const dim = 0.15; // dim border color
+
+  // Top separator line
+  drawHLine(0, COLS - 1, y, dim, dim, dim);
+
+  // === LEFT: Sync status box ===
+  // "SYNC" = 4 chars × 3px + 3 gaps × 1px = 15px text width
+  // Box inner = 15 + 2px padding each side = 19px → boxL=1, boxR=21 (21px wide)
+  const boxL = 1, boxR = 21, boxT = y + 2, boxB = y + 8;
+  const syncColor = cfg.ntpSynced
+    ? { r: 0, g: 0.7, b: 0 }
+    : { r: 0.7, g: 0, b: 0 };
+
+  drawRect(boxL, boxT, boxR, boxB, syncColor.r * 0.6, syncColor.g * 0.6, syncColor.b * 0.6);
+
+  if (cfg.ntpSynced) {
+    // Center "SYNC" (15px wide) in box inner (19px): pad = 2px
+    drawTinyStr('SYNC', boxL + 3, boxT + 1, syncColor);
+  } else {
+    // "----" centered
+    for (let dx = 0; dx < 4; dx++) {
+      const lx = boxL + 3 + dx * 4;
+      const ly = boxT + 3;
+      setPixel(lx, ly, syncColor.r, syncColor.g, syncColor.b);
+      setPixel(lx + 1, ly, syncColor.r, syncColor.g, syncColor.b);
+      setPixel(lx + 2, ly, syncColor.r, syncColor.g, syncColor.b);
+    }
+  }
+
+  // === RIGHT: Stratum box (matching left column style) ===
+  const sBoxR = COLS - 2, sBoxL = COLS - 25, sBoxT = y + 2, sBoxB = y + 8;
+  const stratColor = cfg.ntpSynced
+    ? { r: 0, g: 0.5, b: 0.3 }
+    : { r: 0.4, g: 0.2, b: 0 };
+
+  drawRect(sBoxL, sBoxT, sBoxR, sBoxB, stratColor.r * 0.5, stratColor.g * 0.5, stratColor.b * 0.5);
+  drawTinyStr('STRAT', sBoxL + 2, sBoxT + 1, stratColor);
+
+  // --- GMT and Stratum readouts in the gaps between boxes and offset bar ---
+  const gmtColor = { r: 0.3, g: 0.3, b: 0.35 };
+  const tzOffset = -(new Date().getTimezoneOffset() / 60);
+  const gmtSign = tzOffset >= 0 ? '+' : '-';
+  const gmtStr = 'GMT' + gmtSign + String(Math.abs(tzOffset));
+
+  // GMT: in the gap between left box (ends x=21) and offset bar area (starts ~x=48)
+  // Centered vertically with the boxes (boxT+1 to boxT+5 = 5px tall tiny font)
+  const gmtX = boxR + 3; // 3px gap from box edge
+  const gmtVCenter = boxT + Math.floor((boxB - boxT - 5) / 2) + 1;
+  drawTinyStr(gmtStr, gmtX, gmtVCenter, gmtColor);
+
+  // Stratum number: in the gap between offset bar area (~x=80) and right box (starts x=103)
+  // Right-aligned against the right box
+  const stratStr = String(cfg.ntpStratum);
+  const stratNumWidth = tinyStrWidth(stratStr);
+  const stratNumX = sBoxL - stratNumWidth - 3; // 3px gap from box edge
+  drawTinyStr(stratStr, stratNumX, gmtVCenter, gmtColor);
+
+  // === CENTER: Offset bar ===
+  // Centered at pixel 64 (display midpoint), bar extends left or right
+  const barCenter = 64;
+  const barY = y + 3;
+  const barH = 3;
+  const maxBarPx = 16; // tighter now with wider side boxes
+  const offsetPx = Math.round((cfg.ntpOffset / 50) * maxBarPx);
+
+  // Offset color: green < 10ms, yellow < 30ms, red >= 30ms
+  const absOff = Math.abs(cfg.ntpOffset);
+  const barColor = absOff < 10
+    ? { r: 0, g: 0.65, b: 0 }
+    : absOff < 30
+      ? { r: 0.65, g: 0.55, b: 0 }
+      : { r: 0.7, g: 0, b: 0 };
+
+  // Draw scale marks (dim ticks at ±10, ±20, ±30, ±40, ±50ms positions)
+  for (let tick = -50; tick <= 50; tick += 10) {
+    if (tick === 0) continue;
+    const tx = barCenter + Math.round((tick / 50) * maxBarPx);
+    const tickDim = 0.12;
+    setPixel(tx, barY, tickDim, tickDim, tickDim);
+    setPixel(tx, barY + barH - 1, tickDim, tickDim, tickDim);
+  }
+
+  // Draw center line (zero reference) — brighter
+  for (let by = 0; by < barH; by++) {
+    setPixel(barCenter, barY + by, 0.3, 0.3, 0.3);
+  }
+
+  // Draw the offset bar extending from center
+  if (offsetPx !== 0) {
+    const dir = offsetPx > 0 ? 1 : -1;
+    for (let i = 1; i <= Math.abs(offsetPx); i++) {
+      const bx = barCenter + dir * i;
+      for (let by = 0; by < barH; by++) {
+        setPixel(bx, barY + by, barColor.r, barColor.g, barColor.b);
+      }
+    }
+    // Arrow tip at the end
+    const tipX = barCenter + offsetPx;
+    setPixel(tipX, barY - 1, barColor.r * 0.5, barColor.g * 0.5, barColor.b * 0.5);
+    setPixel(tipX, barY + barH, barColor.r * 0.5, barColor.g * 0.5, barColor.b * 0.5);
+  }
+
+  // Offset value label — only show when date is not displayed (saves vertical space)
+  if (cfg.dateMode === 'off') {
+    const offSign = cfg.ntpOffset >= 0 ? '+' : '-';
+    const offStr = String(Math.abs(cfg.ntpOffset));
+    const offLabelChars = [offSign, ...offStr, 'm', 's'];
+
+    const labelTotalW = offLabelChars.length * 4 - 1;
+    const labelX = barCenter - Math.floor(labelTotalW / 2);
+    const labelY = barY + barH + 1;
+    const labelColor = { r: 0.3, g: 0.3, b: 0.3 };
+
+    for (let i = 0; i < offLabelChars.length; i++) {
+      drawTiny(offLabelChars[i], labelX + i * 4, labelY, labelColor);
+    }
+  }
+}
+
+// ============================================================
+//  CANVAS RENDERING
+// ============================================================
+const canvas = document.getElementById('matrix');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const dotSize = cfg.ledSize;
+  const gap = Math.max(1, Math.floor(dotSize * 0.5));
+  const pitch = dotSize + gap;
+  canvas.width = COLS * pitch + gap;
+  canvas.height = ROWS * pitch + gap;
+}
+
+function renderCanvas() {
+  const dotSize = cfg.ledSize;
+  const gap = Math.max(1, Math.floor(dotSize * 0.5));
+  const pitch = dotSize + gap;
+  const glow = cfg.glowIntensity;
+
+  // Dark PCB background
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Panel boundary
+  if (cfg.showPanelBoundary) {
+    const bx = 64 * pitch + Math.floor(gap / 2);
+    ctx.strokeStyle = 'rgba(40, 40, 40, 0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(bx, 0);
+    ctx.lineTo(bx, canvas.height);
+    ctx.stroke();
+  }
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const px = fb[y][x];
+      const br = cfg.brightness;
+      const r = Math.round(px.r * br * 255);
+      const g = Math.round(px.g * br * 255);
+      const b = Math.round(px.b * br * 255);
+
+      const cx = gap + x * pitch + dotSize / 2;
+      const cy = gap + y * pitch + dotSize / 2;
+      const radius = dotSize / 2;
+
+      if (r === 0 && g === 0 && b === 0) {
+        // Unlit LED — very faint dot
+        ctx.fillStyle = 'rgba(20, 20, 20, 0.5)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+
+      // Glow effect
+      if (glow > 0) {
+        const glowRadius = radius * (1.5 + glow);
+        const grad = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, glowRadius);
+        grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${0.3 * glow})`);
+        grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, glowRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // LED dot
+      const grad2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+      grad2.addColorStop(0, `rgb(${Math.min(255, r + 60)}, ${Math.min(255, g + 60)}, ${Math.min(255, b + 60)})`);
+      grad2.addColorStop(0.7, `rgb(${r}, ${g}, ${b})`);
+      grad2.addColorStop(1, `rgb(${Math.round(r * 0.6)}, ${Math.round(g * 0.6)}, ${Math.round(b * 0.6)})`);
+      ctx.fillStyle = grad2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
+let frameCount = 0;
+let fpsTime = performance.now();
+let currentFps = 0;
+
+function frame() {
+  const now = getSimTime();
+
+  clearFb();
+
+  // Render time
+  const result = renderTimeScroll(now);
+
+  // Render NTP indicators below time
+  if (cfg.showNTP) {
+    const ntpY = result.startY + result.charH + 2;
+    if (ntpY + 7 <= ROWS) {
+      renderNTPStatus(ntpY);
+    } else {
+      renderNTPStatus(ROWS - 8);
+    }
+  }
+
+  renderCanvas();
+
+  // FPS counter
+  frameCount++;
+  const elapsed = performance.now() - fpsTime;
+  if (elapsed > 1000) {
+    currentFps = Math.round(frameCount * 1000 / elapsed);
+    frameCount = 0;
+    fpsTime = performance.now();
+  }
+  document.getElementById('stats').textContent =
+    `${currentFps} fps | ${COLS}×${ROWS} pixels | Theme: ${cfg.theme}`;
+
+  requestAnimationFrame(frame);
+}
+
+// ============================================================
+//  CONTROLS BINDING
+// ============================================================
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { r, g, b };
+}
+
+document.getElementById('theme').addEventListener('change', e => {
+  cfg.theme = e.target.value;
+});
+document.getElementById('customColor').addEventListener('input', e => {
+  cfg.customColor = hexToRgb(e.target.value);
+});
+document.getElementById('accentColor').addEventListener('input', e => {
+  cfg.accentColor = hexToRgb(e.target.value);
+});
+document.getElementById('transitionMode').addEventListener('change', e => {
+  cfg.transitionMode = e.target.value;
+});
+document.getElementById('colonStyle').addEventListener('change', e => {
+  cfg.colonStyle = e.target.value;
+});
+document.getElementById('speed').addEventListener('change', e => {
+  // Reset time base when changing speed to avoid jumps
+  timeBase = Date.now();
+  perfBase = performance.now();
+  cfg.speed = parseInt(e.target.value);
+});
+document.getElementById('brightness').addEventListener('input', e => {
+  cfg.brightness = parseInt(e.target.value) / 100;
+});
+document.getElementById('ledSize').addEventListener('input', e => {
+  cfg.ledSize = parseInt(e.target.value);
+  resizeCanvas();
+});
+document.getElementById('glowIntensity').addEventListener('input', e => {
+  cfg.glowIntensity = parseInt(e.target.value) / 100;
+});
+document.getElementById('dateMode').addEventListener('change', e => {
+  cfg.dateMode = e.target.value;
+});
+document.getElementById('dateFormat').addEventListener('change', e => {
+  cfg.dateFormat = e.target.value;
+});
+document.getElementById('showPanelBoundary').addEventListener('change', e => {
+  cfg.showPanelBoundary = e.target.checked;
+});
+document.getElementById('showNTP').addEventListener('change', e => {
+  cfg.showNTP = e.target.checked;
+});
+document.getElementById('ntpOffset').addEventListener('input', e => {
+  cfg.ntpOffset = parseInt(e.target.value);
+});
+document.getElementById('ntpStratum').addEventListener('input', e => {
+  cfg.ntpStratum = parseInt(e.target.value);
+});
+document.getElementById('ntpSynced').addEventListener('change', e => {
+  cfg.ntpSynced = e.target.checked;
+});
+
+// ============================================================
+//  INIT
+// ============================================================
+resizeCanvas();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
