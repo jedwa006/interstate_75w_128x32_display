@@ -9,6 +9,48 @@ from fonts import (
 COLS = 128
 ROWS = 32
 
+
+def _day_of_year(year, month, day):
+    """Return 1-based day of year."""
+    days_in_month = (0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+    doy = sum(days_in_month[1:month]) + day
+    if month > 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
+        doy += 1
+    return doy
+
+
+def _dow_mon(year, month, day):
+    """Day of week, 0=Mon..6=Sun (ISO 8601)."""
+    t = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
+    y = year - (1 if month < 3 else 0)
+    dow_sun = (y + y // 4 - y // 100 + y // 400 + t[month - 1] + day) % 7
+    return (dow_sun + 6) % 7
+
+
+def _iso_week(year, month, day):
+    """Calculate ISO 8601 week number (1-53).
+    Week 1 contains the year's first Thursday."""
+    doy = _day_of_year(year, month, day)
+    dow = _dow_mon(year, month, day)  # 0=Mon..6=Sun
+
+    # Find DOY of the Thursday in the current week
+    thu_doy = doy + (3 - dow)
+
+    # Thursday in previous year → last week of prev year
+    if thu_doy < 1:
+        return _iso_week(year - 1, 12, 31)
+
+    # Thursday in next year → week 1 of next year
+    year_days = 366 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 365
+    if thu_doy > year_days:
+        return 1
+
+    # First Thursday of the year
+    jan1_dow = _dow_mon(year, 1, 1)
+    first_thu_doy = 1 + (3 - jan1_dow) % 7
+
+    return (thu_doy - first_thu_doy) // 7 + 1
+
 MONTHS = ('JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
           'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC')
 DAYS = ('MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN')
@@ -64,8 +106,9 @@ class ClockDisplay:
         # Top line: date, debug, or both (tiny font, row 0)
         fmt = self.config.get("date_format", "iso")
         if fmt == "debug":
-            # Date left-aligned, debug right-aligned
-            date_short = "{:02d}-{:02d}".format(month, day)
+            # Date + week left-aligned, debug right-aligned
+            wk = _iso_week(year, month, day)
+            date_short = "{:02d}-{:02d}-{:02d} W{:02d}".format(month, day, year % 100, wk)
             debug_str = self._format_debug()
             draw_tiny_str(self.g, date_short, 1, 0, self.pen_dim)
             debug_w = tiny_str_width(debug_str)
