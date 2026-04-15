@@ -61,13 +61,18 @@ class ClockDisplay:
         year, month, day, hour, minute, second, weekday = local_time
         now_ticks = time.ticks_ms()
 
-        # Top line: date or debug info (tiny font, row 0)
+        # Top line: date, debug, or both (tiny font, row 0)
         fmt = self.config.get("date_format", "iso")
         if fmt == "debug":
-            top_str = self._format_debug()
+            # Date left-aligned, debug right-aligned
+            date_short = "{:02d}-{:02d}".format(month, day)
+            debug_str = self._format_debug()
+            draw_tiny_str(self.g, date_short, 1, 0, self.pen_dim)
+            debug_w = tiny_str_width(debug_str)
+            draw_tiny_str(self.g, debug_str, COLS - debug_w - 1, 0, self.pen_dim)
         else:
             top_str = self._format_date(year, month, day, weekday)
-        draw_tiny_centered(self.g, top_str, 0, self.pen_dim)
+            draw_tiny_centered(self.g, top_str, 0, self.pen_dim)
 
         # Time (large font, row 7)
         time_str = "{:02d}:{:02d}:{:02d}".format(hour, minute, second)

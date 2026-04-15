@@ -12,5 +12,6 @@
   "brightness": 85,
   "colon_style": "blink",
   "date_format": "iso",
-  "transition_mode": "scroll"
+  "transition_mode": "scroll",
+  "color_order": "RBG"
 }
