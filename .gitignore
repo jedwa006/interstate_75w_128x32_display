@@ -24,5 +24,10 @@ Thumbs.db
 # Node (for local dev server if used with simulator)
 node_modules/
 
+# Firmware build artifacts
+.build/
+output/
+*.uf2
+
 # Claude Code
 .claude/

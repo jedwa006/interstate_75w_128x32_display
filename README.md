@@ -80,6 +80,43 @@ Power cycle the board. It will:
 2. Show "SYNCING NTP" while fetching time
 3. Show "READY" and begin displaying the clock
 
+## Building Firmware From Source
+
+If the pre-built UF2 from [Pimoroni's releases](https://github.com/pimoroni/interstate75/releases) doesn't work for your board (or you want the latest MicroPython + PSRAM support + fixes not yet in a release), you can build from source:
+
+### Prerequisites
+
+**macOS:**
+```bash
+brew install cmake arm-none-eabi-gcc ccache python3
+```
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt install cmake gcc-arm-none-eabi build-essential ccache python3 python3-pip
+```
+
+### Build
+
+```bash
+./build.sh              # Full build (clone repos + compile) — first run takes ~10-15 min
+./build.sh rebuild      # Rebuild only (after code changes)
+./build.sh clean        # Remove build artifacts
+```
+
+Output UF2 files appear in `output/`:
+- `i75w_rp2350-micropython.uf2` — standard firmware
+- `i75w_rp2350-micropython-with-filesystem.uf2` — with writable filesystem (use this one)
+
+### What's different from the v0.0.5 release?
+
+The build script tracks Pimoroni's latest `main` branch, which includes:
+- MicroPython master (latest upstream)
+- GCC 14.2 toolchain
+- PicoVector2 + layers support
+- Bluetooth (BTStack + CYW43)
+- All bug fixes since January 2025
+
 ## Simulator
 
 Open `simulator.html` in any browser to preview and experiment with the display layout, color themes, transition modes, and NTP indicators — no hardware required.
@@ -97,6 +134,7 @@ Open `simulator.html` in any browser to preview and experiment with the display 
 ```
 .
 ├── simulator.html           # Browser-based display simulator
+├── build.sh                 # Firmware build script (from source)
 ├── firmware/
 │   ├── main.py              # Entry point — boot sequence + main loop
 │   ├── config.json.example  # Configuration template
